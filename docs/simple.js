@@ -123,12 +123,6 @@ class VM {
 
 const vm = new VM();
 
-// `window.playROM(uint8Array)` — programmatic ROM-load entry. Lets an
-// embedding page hand in freshly-generated ROM bytes instead of the
-// `ROM_FILENAME` fetch, while preserving the rest of `simple.js`'s
-// behaviour. The synchronous startPlayback() call resumes the
-// AudioContext inside the user's gesture transient so audio isn't
-// stuck waiting for the next stray click.
 window.playROM = async function(bytes) {
   const module = await binjgbPromise;
   Emulator.start(module, bytes.buffer, new Uint8Array(0));
