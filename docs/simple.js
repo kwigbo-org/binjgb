@@ -123,14 +123,22 @@ class VM {
 
 const vm = new VM();
 
-// Load a ROM.
-(async function go() {
-  let response = await fetch(ROM_FILENAME);
-  let romBuffer = await response.arrayBuffer();
-  const extRam = new Uint8Array(JSON.parse(localStorage.getItem('extram')));
-  Emulator.start(await binjgbPromise, romBuffer, extRam);
-  emulator.setBuiltinPalette(vm.palIdx);
-})();
+// `window.playROM(uint8Array)` — programmatic ROM-load entry. Lets an
+// embedding page hand in freshly-generated ROM bytes instead of the
+// `ROM_FILENAME` fetch, while preserving the rest of `simple.js`'s
+// behaviour. The synchronous startPlayback() call resumes the
+// AudioContext inside the user's gesture transient so audio isn't
+// stuck waiting for the next stray click.
+window.playROM = async function(bytes) {
+  const module = await binjgbPromise;
+  Emulator.start(module, bytes.buffer, new Uint8Array(0));
+  if (emulator) {
+    emulator.setBuiltinPalette(vm.palIdx);
+    if (emulator.audio && typeof emulator.audio.startPlayback === 'function') {
+      emulator.audio.startPlayback();
+    }
+  }
+};
 
 
 // Copied from demo.js
