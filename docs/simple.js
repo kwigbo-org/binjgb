@@ -606,6 +606,13 @@ class Audio {
         this.module, this.module._get_audio_buffer_ptr(e),
         this.module._get_audio_buffer_capacity(e));
     this.startSec = 0;
+    // Track every BufferSource pushBuffer schedules so destroy() can
+    // stop them — otherwise the queue's ~100-200ms tail outlives
+    // Emulator.stop and a fresh Emulator.start ends up playing on top
+    // of it (audible as "two songs at once" when a host stops + plays
+    // again, or as stale audio resuming after the OS suspends + resumes
+    // the AudioContext during a device sleep).
+    this.activeSources = new Set();
     this.resume();
 
     this.boundStartPlayback = this.startPlayback.bind(this);
@@ -642,6 +649,8 @@ class Audio {
       bufferSource.buffer = buffer;
       bufferSource.connect(Audio.ctx.destination);
       bufferSource.start(this.startSec);
+      this.activeSources.add(bufferSource);
+      bufferSource.onended = () => this.activeSources.delete(bufferSource);
       const bufferSec = AUDIO_FRAMES / this.sampleRate;
       this.startSec += bufferSec;
     } else {
@@ -669,6 +678,14 @@ class Audio {
       window.removeEventListener('touchend', this.boundStartPlayback, true);
       this.boundStartPlayback = null;
     }
+    // Stop + disconnect every BufferSource still queued so the audio
+    // graph is silent immediately. stop() throws if a source already
+    // ended naturally — swallow that since it's the desired state.
+    for (const src of this.activeSources) {
+      try { src.stop(); }       catch { /* already ended */ }
+      try { src.disconnect(); } catch { /* already disconnected */ }
+    }
+    this.activeSources.clear();
     this.buffer = null;
     this.started = false;
   }
