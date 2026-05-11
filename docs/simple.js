@@ -132,6 +132,19 @@ const vm = new VM();
   emulator.setBuiltinPalette(vm.palIdx);
 })();
 
+// Programmatic entry point for embedders. Pass ROM bytes directly
+// instead of going through the ROM_FILENAME fetch above.
+window.playROM = async function(bytes) {
+  const module = await binjgbPromise;
+  Emulator.start(module, bytes.buffer, new Uint8Array(0));
+  if (emulator) {
+    emulator.setBuiltinPalette(vm.palIdx);
+    if (emulator.audio && typeof emulator.audio.startPlayback === 'function') {
+      emulator.audio.startPlayback();
+    }
+  }
+};
+
 
 // Copied from demo.js
 function makeWasmBuffer(module, ptr, size) {
