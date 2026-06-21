@@ -521,21 +521,57 @@ class Emulator {
     };
     this.boundKeyDown = this.keyDown.bind(this);
     this.boundKeyUp = this.keyUp.bind(this);
+    // Stuck-key safety net: when the browser loses focus (system
+    // shortcut, OS chrome, alt-tab), any held bound key's keyup fires
+    // outside our tab and we never see the release. Force-release only
+    // currently-held keys on blur. Most impactful for ShiftLeft
+    // (fast-forward) + Backspace (rewind) which would otherwise hold
+    // the rAF loop in a 100% CPU spin until the user re-presses the
+    // key. Tracking held state (vs blindly calling every binding with
+    // `false`) avoids firing edge-triggered handlers like saveState
+    // (F6) / loadState (F9) — they ignore their argument and would
+    // run on every blur, silently overwriting the user's save slot.
+    this.heldKeys = new Set();
+    // Whitelist: handlers that respect their `isKeyDown` arg (level-
+    // triggered — joypad + fast-forward + rewind). The rest of the
+    // bindings (Space pause, [/] palette, F6 save, F9 load) ignore
+    // the arg and fire on every call — keeping them out of heldKeys
+    // makes blur a no-op for them, so a focus-loss with one held
+    // can't re-fire the action.
+    this.levelTriggeredKeys = new Set([
+      'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowUp',
+      'KeyZ', 'KeyX', 'Enter', 'Tab',
+      'Backspace', 'ShiftLeft',
+    ]);
+    this.boundReleaseAll = this.releaseHeldKeys.bind(this);
 
     window.addEventListener('keydown', this.boundKeyDown);
     window.addEventListener('keyup', this.boundKeyUp);
+    window.addEventListener('blur', this.boundReleaseAll);
   }
 
   unbindKeys() {
     window.removeEventListener('keydown', this.boundKeyDown);
     window.removeEventListener('keyup', this.boundKeyUp);
+    window.removeEventListener('blur', this.boundReleaseAll);
+    this.heldKeys.clear();
   }
 
   keyDown(event) {
     if (event.code in this.keyFuncs) {
+      // Skip when any modifier is also held — system shortcuts like
+      // Cmd+Shift+4 (macOS screenshot region) steal focus before the
+      // keyup fires inside our tab, leaving fastForward stuck at true
+      // and the emulator spinning at 100% CPU. The bound keys are all
+      // game inputs (A/B/Start/Select/D-pad/Shift fast-forward/etc.)
+      // — none of them should fire while a chord is being assembled.
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (this.touchEnabled) {
         this.touchEnabled = false;
         this.updateOnscreenGamepad();
+      }
+      if (this.levelTriggeredKeys.has(event.code)) {
+        this.heldKeys.add(event.code);
       }
       this.keyFuncs[event.code](true);
       event.preventDefault();
@@ -544,9 +580,17 @@ class Emulator {
 
   keyUp(event) {
     if (event.code in this.keyFuncs) {
+      this.heldKeys.delete(event.code);
       this.keyFuncs[event.code](false);
       event.preventDefault();
     }
+  }
+
+  releaseHeldKeys() {
+    for (const code of this.heldKeys) {
+      this.keyFuncs[code](false);
+    }
+    this.heldKeys.clear();
   }
 
   keyRewind(isKeyDown) {
